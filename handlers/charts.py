@@ -60,7 +60,7 @@ def create_progress_chart(user_data: dict) -> io.BytesIO:
             label="Баланс калорий"
         )
         ax2.axhline(
-            y=0,
+            y=user_data["calorie_goal"],
             linestyle="--",
             linewidth=1,
             label="Ноль"
