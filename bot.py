@@ -1,7 +1,9 @@
+import os
 import asyncio
 import traceback
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
-from aiogram.types import ErrorEvent
+from aiogram.types import Update, ErrorEvent
 
 from config import BOT_TOKEN
 from middleware import LoggingMiddleware
@@ -23,7 +25,6 @@ dp.include_router(charts.router)
 
 @dp.error()
 async def error_handler(event: ErrorEvent):
-    """Global error handler with detailed logging"""
     error = event.exception
     update = event.update
     
@@ -41,7 +42,6 @@ async def error_handler(event: ErrorEvent):
     traceback.print_exception(type(error), error, error.__traceback__)
     print("="*130 + "\n")
     
-    # Send user-friendly message
     if update.message:
         try:
             error_messages = {
@@ -58,13 +58,54 @@ async def error_handler(event: ErrorEvent):
             await update.message.answer(user_message)
         except Exception as send_error:
             print(f"[ERROR] Failed to send error message: {send_error}")
-    
+
     return True
 
-async def main():
-    print('🤖 Бот запущен')
-    await set_commands(bot)
-    await dp.start_polling(bot)
 
+# =====================
+# FastAPI app (Webhook)
+# =====================
+app = FastAPI()
+
+WEBHOOK_PATH = "/webhook"
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+if not RENDER_EXTERNAL_URL:
+    raise RuntimeError("RENDER_EXTERNAL_URL is not set")
+
+WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
+
+
+@app.on_event("startup")
+async def on_startup():
+    print("🚀 Starting bot with webhook")
+    await set_commands(bot)
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Webhook set: {WEBHOOK_URL}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    await bot.session.close()
+    print("🛑 Bot stopped")
+
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    update = Update.model_validate(await request.json())
+    await dp.feed_update(bot, update)
+    return {"ok": True}
+
+
+# =====================
+# Entry point (Render)
+# =====================
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ["PORT"])
+    )
